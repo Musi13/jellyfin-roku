@@ -103,6 +103,15 @@ sub Main()
         group = CreateCollectionsList(selectedItem.Id)
         group.overhangTitle = selectedItem.name
         m.scene.appendChild(group)
+      else if (selectedItem.type = "CollectionFolder" OR selectedItem.type = "UserView") AND selectedItem.collectionType = "livetv"
+        group.lastFocus = group.focusedChild
+        group.setFocus(false)
+        group.visible = false
+
+        m.overhang.title = selectedItem.name
+        group = CreateChannelList(selectedItem.Id)
+        group.overhangTitle = selectedItem.name
+        m.scene.appendChild(group)
       else if selectedItem.type = "Episode" then
         ' play episode
         ' todo: create an episode page to link here
@@ -208,6 +217,22 @@ sub Main()
       m.scene.appendChild(group)
     else if isNodeEvent(msg, "episodeSelected")
       ' If you select a TV Episode from ANYWHERE, follow this flow
+      node = getMsgPicker(msg, "picker")
+      video_id = node.id
+      video = CreateVideoPlayerGroup(video_id)
+      if video <> invalid then
+        group.lastFocus = group.focusedChild
+        group.setFocus(false)
+        group.visible = false
+        group = video
+        m.scene.appendChild(group)
+        group.setFocus(true)
+        group.control = "play"
+        ReportPlayback(group, "start")
+        m.overhang.visible = false
+      end if
+    else if isNodeEvent(msg, "channelSelected")
+      ' If you select a Channel from ANYWHERE, follow this flow
       node = getMsgPicker(msg, "picker")
       video_id = node.id
       video = CreateVideoPlayerGroup(video_id)
@@ -340,7 +365,7 @@ sub Main()
       end if
     else if isNodeEvent(msg, "position")
       video = msg.getRoSGNode()
-      if video.position >= video.duration then
+      if video.position >= video.duration and not video.content.live then
         stopPlayback()
       end if
     else if isNodeEvent(msg, "fire")

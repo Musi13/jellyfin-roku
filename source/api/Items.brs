@@ -22,17 +22,173 @@ function UserItemsResume(params = {} as object)
   return data
 end function
 
-function ItemGetSession(id as string, StartTimeTicks = 0 as longinteger)
+function ItemGetPlaybackInfo(id as string, StartTimeTicks = 0 as longinteger)
   params = {
-    UserId: get_setting("active_user"),
-    StartTimeTicks: StartTimeTicks,
-    IsPlayback: "true",
-    AutoOpenLiveStream: "true",
-    MaxStreamingBitrate: "140000000"
+    "UserId": get_setting("active_user"),
+    "StartTimeTicks": StartTimeTicks,
+    "IsPlayback": true,
+    "AutoOpenLiveStream": true,
+    "MaxStreamingBitrate": "140000000"
   }
   resp = APIRequest(Substitute("Items/{0}/PlaybackInfo", id), params)
-  data = getJson(resp)
-  return data.PlaySessionId
+  return getJson(resp)
+end function
+
+function ItemPostPlaybackInfo(id as string, StartTimeTicks = 0 as longinteger)
+  'This profile is kind of a guess based on Roku's docs and a profile I
+  'took from jellyfin-web/firefox. Also it has to be less than 2048 bytes once
+  'encoded as json, or you have to figure out multipart upload.
+  'But it seems to work for my use case
+  body = {
+    "DeviceProfile": {
+      "MaxStreamingBitrate": 120000000,
+      "MaxStaticBitrate": 100000000,
+      "MusicStreamingTranscodingBitrate": 192000,
+      "DirectPlayProfiles": [
+        {
+          "Container": "mp4,m4v",
+          "Type": "Video",
+          "VideoCodec": "h264,vp8,vp9",
+          "AudioCodec": "aac,opus,flac,vorbis"
+        },
+        {
+          "Container": "mp3",
+          "Type": "Audio",
+          "AudioCodec": "mp3"
+        },
+        {
+          "Container": "aac",
+          "Type": "Audio"
+        },
+        {
+          "Container": "m4a",
+          "AudioCodec": "aac",
+          "Type": "Audio"
+        },
+        {
+          "Container": "flac",
+          "Type": "Audio"
+        }
+      ],
+      "TranscodingProfiles": [
+        {
+          "Container": "aac",
+          "Type": "Audio",
+          "AudioCodec": "aac",
+          "Context": "Streaming",
+          "Protocol": "http",
+          "MaxAudioChannels": "2"
+        },
+        {
+          "Container": "mp3",
+          "Type": "Audio",
+          "AudioCodec": "mp3",
+          "Context": "Streaming",
+          "Protocol": "http",
+          "MaxAudioChannels": "2"
+        },
+        {
+          "Container": "mp3",
+          "Type": "Audio",
+          "AudioCodec": "mp3",
+          "Context": "Static",
+          "Protocol": "http",
+          "MaxAudioChannels": "2"
+        },
+        {
+          "Container": "aac",
+          "Type": "Audio",
+          "AudioCodec": "aac",
+          "Context": "Static",
+          "Protocol": "http",
+          "MaxAudioChannels": "2"
+        },
+        {
+          "Container": "ts",
+          "Type": "Video",
+          "AudioCodec": "aac",
+          "VideoCodec": "h264",
+          "Context": "Streaming",
+          "Protocol": "hls",
+          "MaxAudioChannels": "2",
+          "MinSegments": "1",
+          "BreakOnNonKeyFrames": true
+        },
+        {
+          "Container": "mp4",
+          "Type": "Video",
+          "AudioCodec": "aac,opus,flac,vorbis",
+          "VideoCodec": "h264",
+          "Context": "Static",
+          "Protocol": "http"
+        }
+      ],
+      "ContainerProfiles": [],
+      "CodecProfiles": [
+        {
+          "Type": "VideoAudio",
+          "Codec": "aac",
+          "Conditions": [
+            {
+              "Condition": "Equals",
+              "Property": "IsSecondaryAudio",
+              "Value": "false",
+              "IsRequired": false
+            }
+          ]
+        },
+        {
+          "Type": "Video",
+          "Codec": "h264",
+          "Conditions": [
+            {
+              "Condition": "EqualsAny",
+              "Property": "VideoProfile",
+              "Value": "high|main|baseline|constrained baseline",
+              "IsRequired": false
+            },
+            {
+              "Condition": "LessThanEqual",
+              "Property": "VideoLevel",
+              "Value": "51",
+              "IsRequired": false
+            }
+          ]
+        }
+      ],
+      "SubtitleProfiles": [
+        {
+          "Format": "vtt",
+          "Method": "External"
+        },
+        {
+          "Format": "ass",
+          "Method": "External"
+        },
+        {
+          "Format": "ssa",
+          "Method": "External"
+        }
+      ],
+      "ResponseProfiles": [
+        {
+          "Type": "Video",
+          "Container": "m4v",
+          "MimeType": "video/mp4"
+        }
+      ]
+    }
+  }
+  params = {
+    "UserId": get_setting("active_user"),
+    "StartTimeTicks": StartTimeTicks,
+    "IsPlayback": true,
+    "AutoOpenLiveStream": true,
+    "MaxStreamingBitrate": "140000000"
+  }
+  req = APIRequest(Substitute("Items/{0}/PlaybackInfo", id), params)
+  req.SetRequest("POST")
+  return postJson(req, FormatJson(body))
 end function
 
 ' Search across all libraries
@@ -162,6 +318,11 @@ function ItemMetaData(id as string)
     tmp.image = PosterImage(data.id)
     tmp.json = data
     return tmp
+  else if data.type = "TvChannel"
+    tmp = CreateObject("roSGNode", "ChannelData")
+    tmp.image = PosterImage(data.id)
+    tmp.json = data
+    return tmp
   else
     print "Items.brs::ItemMetaData processed unhandled type: " data.type
     ' Return json if we don't know what it is
@@ -226,5 +387,24 @@ function TVNext(id as string)
   for each item in data.Items
     item.image = PosterImage(item.id)
   end for
+  return data
+end function
+
+function Channels()
+  resp = APIRequest("LiveTv/Channels", {})
+
+  data = getJson(resp)
+  results = []
+  for each item in data.Items
+    imgParams = { "maxWidth": 712, "maxheight": 400 }
+    tmp = CreateObject("roSGNode", "ChannelData")
+    tmp.image = PosterImage(item.id, imgParams)
+    if tmp.image <> invalid
+      tmp.image.posterDisplayMode = "scaleToFit"
+    end if
+    tmp.json = item
+    results.push(tmp)
+  end for
+  data.Items = results
   return data
 end function

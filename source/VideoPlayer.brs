@@ -21,8 +21,6 @@ function VideoContent(video) as object
 
   meta = ItemMetaData(video.id)
   video.content.title = meta.Name
-  container = getContainerType(meta)
-  video.container = container
   
   ' If there is a last playback positon, ask user if they want to resume
   position = meta.json.UserData.PlaybackPositionTicks
@@ -39,9 +37,58 @@ function VideoContent(video) as object
   end if
   video.content.PlayStart = int(position/10000000)
 
-  video.PlaySessionId = ItemGetSession(video.id, position)
+  'This doesn't actually get used, but its a url to master.m3u8 with all
+  'the parameters filled in. Instead, we build this ourselves using transcodeParams.
+  transcodingUrl = invalid
+
+  if meta.live then
+    playbackInfo = ItemPostPlaybackInfo(video.id, position)
+    video.PlaySessionId = playbackInfo.PlaySessionId
+    video.content.live = true
+    video.content.StreamFormat = "hls"
+    transcodingUrl = playbackInfo.MediaSources[0].TranscodingUrl
+
+    'I'm not sure if this works for most livetv streams, but with my test streams
+    'the original MediaSource is a placeholder and you only get the real stream data
+    'after POSTing to PlaybackInfo (which starts the TunerHost stream implicitly).
+    'So, I'd like to update meta with this new information, but setting these attributes
+    'seems to do nothing but doesn't raise an exception.
+    ' meta.json.MediaSources = playbackInfo.MediaSources
+    ' meta.json.MediaStreams = playbackInfo.MediaSources[0].MediaStreams
+
+    'To get around this, we'll just recreate the meta object using the json from
+    'the old one, and the stuff we want to copy over
+    tmp = CreateObject("roSGNode", "ChannelData")
+    _newjson = {}
+    _newjson.append(meta.json)
+    _newjson.append({
+      "PlaySessionId": playbackInfo.PlaySessionId,
+      "MediaSources": playbackInfo.MediaSources,
+      "MediaStreams": playbackInfo.MediaSources[0].MediaStreams
+    })
+    tmp.image = PosterImage(_newjson.id)
+    tmp.json = _newjson
+    meta = tmp
+  else
+    playbackInfo = ItemGetPlaybackInfo(video.id, position)
+    video.PlaySessionId = playbackInfo.PlaySessionId
+  end if
+
+  container = getContainerType(meta)
+  video.container = container
+
   transcodeParams = getTranscodeParameters(meta)
   transcodeParams.append({"PlaySessionId": video.PlaySessionId})
+
+  if meta.live then
+    _livestream_params = {
+      "MediaSourceId": playbackInfo.MediaSources[0].Id,
+      "LiveStreamId": playbackInfo.MediaSources[0].LiveStreamId,
+      "MinSegments": 2  'This is a guess about initial buffer size, segments are 3s each
+    }
+    params.append(_livestream_params)
+    transcodeParams.append(_livestream_params)
+  end if
 
   subtitles =  sortSubtitles(meta.id,meta.json.MediaStreams)
   video.Subtitles = subtitles["all"]
@@ -226,6 +273,12 @@ function ReportPlayback(video, state = "update" as string)
     "PositionTicks": str(int(video.position)) + "0000000",
     "IsPaused": (video.state = "paused"),
   }
+  if video.content.live then
+    params.append({
+      "MediaSourceId": video.transcodeParams.MediaSourceId,
+      "LiveStreamId": video.transcodeParams.LiveStreamId
+    })
+  end if
   PlaystateUpdate(video.id, state, params)
 end function
 
